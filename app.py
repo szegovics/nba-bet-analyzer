@@ -1,13 +1,14 @@
 import requests
 import pandas as pd
-from nba_api.stats.endpoints import playergamelog, leaguegamefinder, teamdashboardbygeneralsplits
+from nba_api.stats.endpoints import playergamelog, leaguegamefinder, teamdashboardbygeneralsplits, scoreboardv2
 from nba_api.stats.static import players, teams
-from nba_api.live.nba.endpoints import scoreboard
 import time
 import streamlit as st
+from datetime import datetime, timedelta
+import pytz
 
 # --- OLDAL BEÁLLÍTÁSA ---
-st.set_page_config(page_title="NBA Pro Analizátor", layout="wide")
+st.set_page_config(page_title="NBA Pro Analizátor v2", layout="wide")
 
 # --- API KULCS KEZELÉSE ---
 if "API_KEY" in st.secrets:
@@ -16,24 +17,33 @@ else:
     st.error("Hiba: Az API_KEY nem található a Secrets beállítások között!")
     st.stop()
 
-REGION = 'eu' # Vegas.hu stílusú európai szorzók
+REGION = 'eu' 
 MARKETS = 'player_points,player_rebounds,player_assists'
 
-# --- FUNKCIÓK ---
+# --- SEGÉDFÜGGVÉNYEK ---
 
-def get_today_matchups():
-    """Lekéri a mai meccseket a menetrendből."""
+def get_next_game_date():
+    """Kiszámolja a következő meccsnap dátumát (magyar idő szerint holnap)."""
+    tz = pytz.timezone('Europe/Budapest')
+    now = datetime.now(tz)
+    # Ha hajnal van, még a mai meccsek érdekesek, ha nappal, akkor a holnapiak
+    next_day = now + timedelta(days=1)
+    return next_day.strftime('%Y-%m-%d')
+
+def get_matchups(date_str):
+    """Lekéri a meccseket egy adott napra."""
     try:
-        sb = scoreboard.ScoreBoard()
-        games = sb.get_dict()['scoreboard']['games']
+        sb = scoreboardv2.ScoreboardV2(game_date=date_str)
+        df = sb.get_data_frames()[0]
         matchups = []
-        for g in games:
+        for i in range(0, len(df), 2):
+            away_row = df.iloc[i]
+            home_row = df.iloc[i+1]
             matchups.append({
-                'id': g['gameId'],
-                'home': g['homeTeam']['teamName'],
-                'away': g['awayTeam']['teamName'],
-                'home_id': g['homeTeam']['teamId'],
-                'away_id': g['awayTeam']['teamId']
+                'home_name': home_row['TEAM_NAME'],
+                'home_id': home_row['TEAM_ID'],
+                'away_name': away_row['TEAM_NAME'],
+                'away_id': away_row['TEAM_ID']
             })
         return matchups
     except:
@@ -47,7 +57,7 @@ def get_live_odds():
         if not isinstance(events_res, list): return []
         
         all_props = []
-        for event in events_res[:5]: # Első 5 meccs
+        for event in events_res[:5]: 
             event_id = event['id']
             prop_url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/events/{event_id}/odds'
             res = requests.get(prop_url, params={
@@ -70,7 +80,7 @@ def get_live_odds():
         return []
 
 def get_last_10_player_stat(player_name, prop_type):
-    """Játékos statisztikák lekérése."""
+    """Játékos statisztikák az utolsó 10 meccsről."""
     p = players.find_players_by_full_name(player_name)
     if not p: return None
     try:
@@ -80,37 +90,31 @@ def get_last_10_player_stat(player_name, prop_type):
     except:
         return None
 
-def get_team_stats(team_id, is_home):
-    """Csapat statisztikák: Szezonbeli Home/Away győzelmi arány és dobott/kapott pontok."""
+def get_season_team_stats(team_id, is_home):
+    """Szezonátlagok: Dobott/Kapott pontok a LEJÁTSZOTT meccsek alapján."""
     try:
-        # A TeamDashboardByGeneralSplits a teljes szezon adatait adja alapból
-        dash = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(team_id=team_id)
-        splits = dash.get_data_frames()[1] # Home/Away táblázat
-        
-        # Kiválasztjuk a megfelelő sort (Home vagy Road)
+        dash = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(team_id=team_id, per_mode_detailed='PerGame')
+        splits = dash.get_data_frames()[1] 
         row = splits[splits['GROUP_VALUE'] == ('Home' if is_home else 'Road')]
         
         if not row.empty:
-            win_rate = row['W_PCT'].values[0] * 100
-            pts_scored = row['PTS'].values[0] # Átlag dobott pont abban a felállásban
-            # A kapott pontot a PLUS_MINUS-ból számoljuk ki (PTS - PLUS_MINUS)
+            pts_scored = row['PTS'].values[0]
             pts_allowed = pts_scored - row['PLUS_MINUS'].values[0]
-            
             return {
-                "win_rate": f"{round(win_rate, 1)}%",
+                "win_rate": f"{round(row['W_PCT'].values[0] * 100, 1)}%",
                 "avg_pts": round(pts_scored, 1),
-                "opp_pts": round(pts_allowed, 1)
+                "opp_pts": round(pts_allowed, 1),
+                "gp": int(row['GP'].values[0])
             }
-        else:
-            return {"win_rate": "0%", "avg_pts": 0, "opp_pts": 0}
-    except Exception as e:
-        return {"win_rate": "N/A", "avg_pts": 0, "opp_pts": 0}
+        return {"win_rate": "0%", "avg_pts": 0, "opp_pts": 0, "gp": 0}
+    except:
+        return {"win_rate": "N/A", "avg_pts": 0, "opp_pts": 0, "gp": 0}
 
 # --- UI MEGJELENÍTÉS ---
 
 st.title("🏀 NBA Pro Betting Dashboard")
 st.sidebar.header("Vezérlőpult")
-analysis_mode = st.sidebar.radio("Válassz módot:", ["🔥 Élő Prop Elemző", "📊 Csapat & Totál Elemzés"])
+analysis_mode = st.sidebar.radio("Válassz módot:", ["🔥 Élő Prop Elemző", "📊 Következő Nap: Csapat & Totál"])
 
 if analysis_mode == "🔥 Élő Prop Elemző":
     st.header("Élő Játékos Fogadások (Over)")
@@ -139,34 +143,38 @@ if analysis_mode == "🔥 Élő Prop Elemző":
             st.table(pd.DataFrame(results))
 
 else:
-    st.header("Szezonális Elemzés: Dobott/Kapott Pontok & Győzelmi Arány")
-    if st.button("Napi meccsek elemzése"):
-        matchups = get_today_matchups()
+    next_date = get_next_game_date()
+    st.header(f"Szezonális Elemzés: {next_date}")
+    if st.button(f"{next_date} meccseinek elemzése"):
+        matchups = get_matchups(next_date)
         if not matchups:
-            st.info("Nincs mai meccs a menetrendben.")
+            st.info(f"Nincs meccs a menetrendben erre a napra: {next_date}")
         else:
             team_results = []
             for m in matchups:
-                with st.spinner(f"Adatok lekérése: {m['away']} @ {m['home']}..."):
-                    # Hazai csapat szezonbeli OTTHONI adatai
-                    h_stats = get_team_stats(m['home_id'], True)
-                    # Vendég csapat szezonbeli IDEGENBELI adatai
-                    a_stats = get_team_stats(m['away_id'], False)
+                with st.spinner(f"Adatok: {m['away_name']} @ {m['home_name']}..."):
+                    h_stats = get_season_team_stats(m['home_id'], True)
+                    a_stats = get_season_team_stats(m['away_id'], False)
                     
-                    # Összesített várható pontszám (Hazai dobott + Vendég dobott átlaga)
                     projected_total = h_stats['avg_pts'] + a_stats['avg_pts']
                     
                     team_results.append({
-                        "Meccs": f"{m['away']} @ {m['home']}",
+                        "Meccs": f"{m['away_name']} @ {m['home_name']}",
                         "Hazai Win% (Otthon)": h_stats['win_rate'],
-                        "Hazai Dobott": h_stats['avg_pts'],
-                        "Hazai Kapott": h_stats['opp_pts'],
+                        "Hazai Dobott (Avg)": h_stats['avg_pts'],
+                        "Hazai Kapott (Avg)": h_stats['opp_pts'],
+                        "Meccsszám (H)": h_stats['gp'],
                         "Vendég Win% (Idegen)": a_stats['win_rate'],
-                        "Vendég Dobott": a_stats['avg_pts'],
-                        "Vendég Kapott": a_stats['opp_pts'],
+                        "Vendég Dobott (Avg)": a_stats['avg_pts'],
+                        "Vendég Kapott (Avg)": a_stats['opp_pts'],
+                        "Meccsszám (V)": a_stats['gp'],
                         "Várható Összesített": round(projected_total, 1)
                     })
-                time.sleep(0.7) # API védelem
+                time.sleep(0.7)
             
-            st.table(pd.DataFrame(team_results))
-            st.caption("Megjegyzés: A pontok és győzelmi arányok a teljes szezon Home/Road bontására vonatkoznak.")
+            df_res = pd.DataFrame(team_results)
+            st.table(df_res)
+            st.download_button("Adatok mentése (CSV)", df_res.to_csv(index=False), f"nba_{next_date}.csv")
+
+st.markdown("---")
+st.caption("A csapat statisztikák a teljes szezon lejátszott meccseinek átlagát mutatják Home/Road bontásban.")
