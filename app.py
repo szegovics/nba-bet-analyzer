@@ -81,25 +81,30 @@ def get_last_10_player_stat(player_name, prop_type):
         return None
 
 def get_team_stats(team_id, is_home):
-    """Csapat statisztikák: Home/Away győzelmi arány és átlagok."""
+    """Csapat statisztikák: Szezonbeli Home/Away győzelmi arány és dobott/kapott pontok."""
     try:
-        # Home/Away Split
+        # A TeamDashboardByGeneralSplits a teljes szezon adatait adja alapból
         dash = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(team_id=team_id)
-        splits = dash.get_data_frames()[1]
+        splits = dash.get_data_frames()[1] # Home/Away táblázat
+        
+        # Kiválasztjuk a megfelelő sort (Home vagy Road)
         row = splits[splits['GROUP_VALUE'] == ('Home' if is_home else 'Road')]
-        win_rate = row['W_PCT'].values[0] * 100 if not row.empty else 0
         
-        # Átlag pontok az utolsó 10 meccsen
-        finder = leaguegamefinder.LeagueGameFinder(team_id_nullable=team_id)
-        recent = finder.get_data_frames()[0].head(10)
-        
-        return {
-            "win_rate": f"{round(win_rate, 1)}%",
-            "avg_pts": round(recent['PTS'].mean(), 1),
-            "avg_diff": round(recent['PLUS_MINUS'].mean(), 1)
-        }
-    except:
-        return {"win_rate": "N/A", "avg_pts": 0, "avg_diff": 0}
+        if not row.empty:
+            win_rate = row['W_PCT'].values[0] * 100
+            pts_scored = row['PTS'].values[0] # Átlag dobott pont abban a felállásban
+            # A kapott pontot a PLUS_MINUS-ból számoljuk ki (PTS - PLUS_MINUS)
+            pts_allowed = pts_scored - row['PLUS_MINUS'].values[0]
+            
+            return {
+                "win_rate": f"{round(win_rate, 1)}%",
+                "avg_pts": round(pts_scored, 1),
+                "opp_pts": round(pts_allowed, 1)
+            }
+        else:
+            return {"win_rate": "0%", "avg_pts": 0, "opp_pts": 0}
+    except Exception as e:
+        return {"win_rate": "N/A", "avg_pts": 0, "opp_pts": 0}
 
 # --- UI MEGJELENÍTÉS ---
 
@@ -134,7 +139,7 @@ if analysis_mode == "🔥 Élő Prop Elemző":
             st.table(pd.DataFrame(results))
 
 else:
-    st.header("Mai Meccsek: Home/Away & Pontszámok")
+    st.header("Szezonális Elemzés: Dobott/Kapott Pontok & Győzelmi Arány")
     if st.button("Napi meccsek elemzése"):
         matchups = get_today_matchups()
         if not matchups:
@@ -142,22 +147,26 @@ else:
         else:
             team_results = []
             for m in matchups:
-                with st.spinner(f"Elemzés: {m['away']} @ {m['home']}..."):
+                with st.spinner(f"Adatok lekérése: {m['away']} @ {m['home']}..."):
+                    # Hazai csapat szezonbeli OTTHONI adatai
                     h_stats = get_team_stats(m['home_id'], True)
+                    # Vendég csapat szezonbeli IDEGENBELI adatai
                     a_stats = get_team_stats(m['away_id'], False)
+                    
+                    # Összesített várható pontszám (Hazai dobott + Vendég dobott átlaga)
+                    projected_total = h_stats['avg_pts'] + a_stats['avg_pts']
                     
                     team_results.append({
                         "Meccs": f"{m['away']} @ {m['home']}",
-                        "Hazai Win% (Home)": h_stats['win_rate'],
-                        "Vendég Win% (Away)": a_stats['win_rate'],
-                        "Hazai Átlag PTS": h_stats['avg_pts'],
-                        "Vendég Átlag PTS": a_stats['avg_pts'],
-                        "Várható Összesített": round(h_stats['avg_pts'] + a_stats['avg_pts'], 1),
-                        "Hazai Hendikep (Diff)": h_stats['avg_diff']
+                        "Hazai Win% (Otthon)": h_stats['win_rate'],
+                        "Hazai Dobott": h_stats['avg_pts'],
+                        "Hazai Kapott": h_stats['opp_pts'],
+                        "Vendég Win% (Idegen)": a_stats['win_rate'],
+                        "Vendég Dobott": a_stats['avg_pts'],
+                        "Vendég Kapott": a_stats['opp_pts'],
+                        "Várható Összesített": round(projected_total, 1)
                     })
-                time.sleep(0.7)
+                time.sleep(0.7) # API védelem
+            
             st.table(pd.DataFrame(team_results))
-            st.download_button("Adatok letöltése (CSV)", pd.DataFrame(team_results).to_csv(), "nba_day.csv")
-
-st.markdown("---")
-st.caption("Adatok forrása: NBA.com API & The Odds API. Az esélyek az utolsó 10 meccsre vonatkoznak.")
+            st.caption("Megjegyzés: A pontok és győzelmi arányok a teljes szezon Home/Road bontására vonatkoznak.")
