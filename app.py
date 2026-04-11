@@ -5,7 +5,7 @@ from nba_api.stats.static import players
 import time
 import streamlit as st
 
-from nba_api.stats.endpoints import teamdashboardbyteamperformance, leaguegamefinder
+from nba_api.stats.endpoints import teamdashboardbygeneralsplits, leaguegamefinder
 from nba_api.stats.static import teams
 
 # --- OLDAL BEÁLLÍTÁSA ---
@@ -73,7 +73,11 @@ def get_last_10_stat(player_name, prop_type):
     except:
         return None
 
-def get_team_advanced_stats(team_name, is_home):
+def get_team_advanced_stats(team_id, is_home):
+    from nba_api.stats.endpoints import teamdashboardbygeneralsplits
+    # Ez a végpont adja meg a Home/Away bontást
+    dash = teamdashboardbygeneralsplits.TeamDashboardByGeneralSplits(team_id=team_id)
+    df = dash.get_data_frames()[1] # Az 1-es indexű táblázat a Home/Away split
     """
     Lekéri a csapat specifikus statisztikáit: 
     Győzelmi arány (otthon/idegenben) és átlagos pontok.
