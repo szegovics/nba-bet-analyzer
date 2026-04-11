@@ -52,7 +52,6 @@ def get_live_odds():
                                     'Határ': outcome['point'],
                                     'Odds': outcome['price']
                                 })
-        st.write(event_res)
         return all_props
     except Exception as e:
         st.error(f"Hiba történt: {e}")
