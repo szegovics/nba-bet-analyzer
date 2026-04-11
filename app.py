@@ -40,7 +40,7 @@ def get_live_odds():
                 'markets': MARKETS,
                 'oddsFormat': 'decimal'
             }).json()
-            st.write(res)
+
             if 'bookmakers' in res:
                 for bm in res['bookmakers']:
                     for market in bm['markets']:
