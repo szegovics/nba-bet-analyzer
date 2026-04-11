@@ -19,7 +19,7 @@ REGION = 'eu'
 MARKETS = 'player_points,player_rebounds,player_assists'
 
 # --- FUNKCIÓK ---
-
+st.write(API_KEY)
 def get_live_odds():
     """Lekéri az aktuális fogadási kínálatot."""
     url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/events'
