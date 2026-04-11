@@ -3,9 +3,10 @@ import pandas as pd
 from nba_api.stats.endpoints import playergamelog
 from nba_api.stats.static import players
 import time
+import streamlit as st
 
 # --- BEÁLLÍTÁSOK ---
-API_KEY = 'IDE_ÍRD_AZ_API_KULCSOD'  # Regisztrálj: the-odds-api.com
+API_KEY = st.secrets["API_KEY"] # Regisztrálj: the-odds-api.com
 REGION = 'eu' # Európai irodák
 MARKETS = 'player_points,player_rebounds,player_assists' # Pont, Lepattanó, Gólpassz
 
