@@ -24,7 +24,7 @@ def get_live_odds():
     """Lekéri az aktuális fogadási kínálatot."""
     url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/events'
     try:
-        st.write(events_res = requests.get(url, params={'apiKey': API_KEY}).json())
+        events_res = requests.get(url, params={'apiKey': API_KEY}).json()
         if not isinstance(events_res, list):
             st.error("Hiba az Odds API lekérésekor. Ellenőrizd a kulcsod!")
             return []
@@ -52,6 +52,7 @@ def get_live_odds():
                                     'Határ': outcome['point'],
                                     'Odds': outcome['price']
                                 })
+        st.write(event_res)
         return all_props
     except Exception as e:
         st.error(f"Hiba történt: {e}")
