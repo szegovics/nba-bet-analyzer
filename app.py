@@ -1,94 +1,94 @@
-import streamlit as st
+import requests
 import pandas as pd
-from nba_api.stats.endpoints import commonallplayers, playergamelog
-from nba_api.live.nba.endpoints import scoreboard
+from nba_api.stats.endpoints import playergamelog
+from nba_api.stats.static import players
 import time
 
-st.set_page_config(page_title="NBA Napi Esélylatolgató", layout="wide")
+# --- BEÁLLÍTÁSOK ---
+API_KEY = 'IDE_ÍRD_AZ_API_KULCSOD'  # Regisztrálj: the-odds-api.com
+REGION = 'eu' # Európai irodák
+MARKETS = 'player_points,player_rebounds,player_assists' # Pont, Lepattanó, Gólpassz
 
-st.title("🏀 Napi NBA Statisztikai Elemző")
-st.write("Az utolsó 10 meccs alapján számolt valószínűségek a mai meccsekre.")
-
-# --- FUNKCIÓK ---
-
-@st.cache_data(ttl=3600)
-def get_today_games():
-    """Lekéri a mai meccseket."""
-    sb = scoreboard.ScoreBoard()
-    games = sb.get_dict()['scoreboard']['games']
-    return games
-
-def get_player_stats(player_id):
-    """Lekéri az utolsó 10 meccs pontjait."""
-    try:
-        log = playergamelog.PlayerGameLog(player_id=player_id, season='2023-24')
-        df = log.get_data_frames()[0]
-        return df.head(10)['PTS'].tolist()
-    except:
-        return []
-
-# --- OLDALSÁV / BEÁLLÍTÁSOK ---
-st.sidebar.header("Beállítások")
-target_pts = st.sidebar.slider("Minimum elvárt pontszám", 10, 40, 20)
-min_prob = st.sidebar.slider("Minimum esély szűrése (%)", 0, 100, 60)
-
-if st.button("Mai meccsek és statisztikák betöltése"):
-    games = get_today_games()
+def get_live_odds():
+    """Lekéri az aktuális fogadási kínálatot az Odds API-tól."""
+    url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/events'
+    # Először lekérjük a meccseket
+    events_res = requests.get(url, params={'apiKey': API_KEY}).json()
     
-    if not games:
-        st.warning("Ma nincsenek meccsek vagy még nem frissült a menetrend.")
-    else:
-        results = []
+    all_props = []
+    
+    # Minden meccshez lekérjük a konkrét játékos fogadásokat
+    # Az ingyenes verzióban meccsenként kell lekérni a propokat
+    for event in events_res[:3]: # Limitáljuk az első 3 meccsre a gyorsaság és az API limit miatt
+        event_id = event['id']
+        prop_url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/events/{event_id}/odds'
+        res = requests.get(prop_url, params={
+            'apiKey': API_KEY,
+            'regions': REGION,
+            'markets': MARKETS,
+            'oddsFormat': 'decimal'
+        }).json()
         
-        with st.spinner('Elemzés folyamatban... Ez eltarthat 1-2 percig.'):
-            # Lekérjük az összes aktív játékost egyszer (gyorsítás)
-            all_players = commonallplayers.CommonAllPlayers(is_only_current_season=1).get_data_frames()[0]
-            
-            for game in games:
-                home_team = game['homeTeam']['teamName']
-                away_team = game['awayTeam']['teamName']
-                st.subheader(f"🏟️ {away_team} @ {home_team}")
-                
-                # Itt egy példa listát használunk a top játékosokról, 
-                # mert az összes NBA játékos lekérése túl lassú lenne egyben
-                # A valóságban ide egy "Top Players" listát érdemes tenni
-                sample_players = [
-                    {"name": "Luka Doncic", "id": 1629029},
-                    {"name": "Kyrie Irving", "id": 202681},
-                    {"name": "Jayson Tatum", "id": 1628369},
-                    {"name": "Jaylen Brown", "id": 1627759},
-                    {"name": "Nikola Jokic", "id": 203999}
-                ]
-                
-                # Csak azokat nézzük, akik az adott meccsen játszanak (egyszerűsítve)
-                for p in sample_players:
-                    stats = get_player_stats(p['id'])
-                    if stats:
-                        hits = sum(1 for pts in stats if pts >= target_pts)
-                        prob = (hits / 10) * 100
-                        
-                        if prob >= min_prob:
-                            results.append({
-                                "Játékos": p['name'],
-                                "Meccs": f"{away_team}@{home_team}",
-                                "Cél": f"{target_pts}+ pont",
-                                "Utolsó 10 meccs": str(stats),
-                                "Esély (%)": f"{prob}%",
-                                "Várható Odds": round(100/prob, 2) if prob > 0 else 0
+        if 'bookmakers' in res:
+            for bm in res['bookmakers']:
+                for market in bm['markets']:
+                    for outcome in market['outcomes']:
+                        if 'Over' in outcome['name']: # Csak a "Felett" fogadásokat nézzük az egyszerűség kedvéért
+                            all_props.append({
+                                'player': outcome['description'],
+                                'type': market['key'], # pl. player_points
+                                'line': outcome['point'],
+                                'odds': outcome['price']
                             })
-            
-            if results:
-                df_res = pd.DataFrame(results)
-                st.table(df_res)
-                st.success("Elemzés kész!")
-            else:
-                st.info("A megadott szűrőkkel nem találtam biztos tippet.")
+    return all_props
 
-# --- UTASÍTÁS ---
-st.divider()
-st.info("""
-**Hogyan használd?**
-1. Kattints a betöltésre.
-2. Az app kiszámolja, hányszor érte el a játékos a célpontszámot az utolsó 10 meccsén.
-3. A 'Várható Odds' azt mutatja, mi lenne a reális szorzó. Ha a Vegas ennél nagyobbat ad, akkor érdemes megfogadni!
-""")
+def get_last_10_stat(player_name, prop_type):
+    """Lekéri a specifikus statisztikát az NBA-től."""
+    full_player = players.find_players_by_full_name(player_name)
+    if not full_player: return None
+    
+    p_id = full_player[0]['id']
+    try:
+        log = playergamelog.PlayerGameLog(player_id=p_id).get_data_frames()[0].head(10)
+        
+        # Melyik oszlopot nézzük?
+        col = 'PTS' if 'points' in prop_type else 'REB' if 'rebounds' in prop_type else 'AST'
+        stats = log[col].tolist()
+        return stats
+    except:
+        return None
+
+def main():
+    print("🚀 Élő oddsok betöltése és elemzése...")
+    props = get_live_odds()
+    
+    if not props:
+        print("❌ Nem találtam aktív fogadási kínálatot.")
+        return
+
+    print(f"✅ {len(props)} fogadási lehetőség található. Statisztikák ellenőrzése...\n")
+    print(f"{'JÁTÉKOS':<20} | {'TÍPUS':<10} | {'HATÁR':<6} | {'ESÉLY (10/x)':<12} | {'ODDS':<6} | {'VALUE'}")
+    print("-" * 85)
+
+    seen_players = set() # Hogy ne kérdezzük le ugyanazt a játékost többször
+
+    for p in props:
+        # Csak a legfontosabbakat nézzük, hogy ne fussunk bele API limitbe
+        if p['player'] in seen_players: continue
+        
+        stats = get_last_10_stat(p['player'], p['type'])
+        if stats:
+            hits = sum(1 for s in stats if s > p['line'])
+            prob = (hits / 10)
+            ev = prob * p['odds']
+            
+            status = "🔥 MEGÉRI" if ev > 1.1 else "❌ NEM"
+            
+            print(f"{p['player']:<20} | {p['type'].replace('player_',''):<10} | {p['line']:<6} | {hits*10:>3}% (10/{hits}) | {p['odds']:<6} | {status}")
+            
+            seen_players.add(p['player'])
+            time.sleep(0.6) # NBA API biztonsági szünet
+
+if __name__ == "__main__":
+    main()
+    
