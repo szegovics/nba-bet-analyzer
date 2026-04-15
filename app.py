@@ -46,58 +46,21 @@ MARKETS = 'player_points,player_rebounds,player_assists'
 
 
 
-def get_next_game_date():
-
-    """Kiszámolja a következő meccsnap dátumát (magyar idő szerint holnap)."""
-
-    tz = pytz.timezone('Europe/Budapest')
-
-    now = datetime.now(tz)
-
-    # Ha hajnal van, még a mai meccsek érdekesek, ha nappal, akkor a holnapiak
-
-    next_day = now + timedelta(days=1)
-
-    return next_day.strftime('%Y-%m-%d')
-
-
-
-def get_matchups(date_str):
-
-    """Lekéri a meccseket egy adott napra."""
-
+def get_next_matchday_from_odds():
+    """Lekéri a következő meccsnap dátumát az Odds API eseményeiből."""
+    url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/events'
     try:
-
-        sb = scoreboardv2.ScoreboardV2(game_date=date_str)
-
-        df = sb.get_data_frames()[0]
-
-        matchups = []
-
-        for i in range(0, len(df), 2):
-
-            away_row = df.iloc[i]
-
-            home_row = df.iloc[i+1]
-
-            matchups.append({
-
-                'home_name': home_row['TEAM_NAME'],
-
-                'home_id': home_row['TEAM_ID'],
-
-                'away_name': away_row['TEAM_NAME'],
-
-                'away_id': away_row['TEAM_ID']
-
-            })
-
-        return matchups
-
-    except:
-
-        return []
-
+        res = requests.get(url, params={'apiKey': API_KEY}).json()
+        if res and isinstance(res, list) and len(res) > 0:
+            # Az első elérhető meccs kezdési ideje (pl: 2024-04-16T23:30:00Z)
+            first_game_time = res[0]['commence_time']
+            # Átalakítjuk az NBA API által kedvelt MM/DD/YYYY formátumra
+            dt_obj = datetime.strptime(first_game_time.split('T')[0], '%Y-%m-%d')
+            return dt_obj.strftime('%m/%d/%Y'), res
+        return None, []
+    except Exception as e:
+        st.error(f"Hiba az események lekérésekor: {e}")
+        return None, []
 
 
 def get_live_odds():
@@ -234,55 +197,61 @@ analysis_mode = st.sidebar.radio("Válassz módot:", ["🔥 Élő Prop Elemző",
 
 
 
-if analysis_mode == "🔥 Élő Prop Elemző":
-
-    st.header("Élő Játékos Fogadások (Over)")
-
-    if st.button("Oddsok és Statok lekérése"):
-
-        props = get_live_odds()
-
-        if not props:
-
-            st.warning("Nincs élő kínálat az Odds API-ban (próbáld este).")
-
+if analysis_mode == "📊 Következő Nap: Csapat & Totál":
+    st.header("Szezonális Elemzés az Odds API alapján")
+    
+    if st.button("Következő meccsnap keresése és elemzése"):
+        next_date, events = get_next_matchday_from_odds()
+        
+        if not next_date:
+            st.warning("Nem található aktív meccs az Odds API kínálatában.")
         else:
-
-            results = []
-
-            progress = st.progress(0)
-
-            seen = set()
-
-            for i, p in enumerate(props):
-
-                if p['player'] in seen: continue
-
-                stats = get_last_10_player_stat(p['player'], p['type'])
-
-                if stats:
-
-                    hits = sum(1 for s in stats if s > p['line'])
-
-                    ev = (hits/10) * p['odds']
-
-                    results.append({
-
-                        "Játékos": p['player'], "Típus": p['type'], "Határ": p['line'],
-
-                        "Siker": f"{hits*10}%", "Odds": p['odds'], "EV": round(ev, 2),
-
-                        "Döntés": "🔥 VALUE" if ev > 1.1 else "❌"
-
-                    })
-
-                seen.add(p['player'])
-
-                progress.progress((i+1)/len(props))
-
-                time.sleep(0.6)
-
-            st.table(pd.DataFrame(results))
+            st.success(f"Talált meccsnap: **{next_date}**")
+            
+            team_results = []
+            # Végigmegyünk az Odds API-tól kapott eseményeken
+            # Csak azokat nézzük, amik ugyanazon a napon vannak
+            target_date_iso = datetime.strptime(next_date, '%m/%d/%Y').strftime('%Y-%m-%d')
+            
+            for event in events:
+                if event['commence_time'].startswith(target_date_iso):
+                    home_team_name = event['home_team']
+                    away_team_name = event['away_team']
+                    
+                    with st.spinner(f"Elemzés: {away_team_name} @ {home_team_name}..."):
+                        # Megkeressük az ID-kat a csapatnevek alapján
+                        all_teams = teams.get_teams()
+                        h_id = next((t['id'] for t in all_teams if t['full_name'] == home_team_name), None)
+                        a_id = next((t['id'] for t in all_teams if t['full_name'] == away_team_name), None)
+                        
+                        if h_id and a_id:
+                            # Statisztikák lekérése a már megírt stabil függvénnyel
+                            h_stats = get_season_team_stats(h_id, True)
+                            time.sleep(1.2) # API korlát védelem
+                            a_stats = get_season_team_stats(a_id, False)
+                            time.sleep(1.2)
+                            
+                            projected_total = h_stats['avg_pts'] + a_stats['avg_pts']
+                            
+                            team_results.append({
+                                "Meccs": f"{away_team_name} @ {home_team_name}",
+                                "Kezdés (UTC)": event['commence_time'].split('T')[1][:5],
+                                "Hazai Win%": h_stats['win_rate'],
+                                "Hazai Dobott": h_stats['avg_pts'],
+                                "Vendég Win%": a_stats['win_rate'],
+                                "Vendég Dobott": a_stats['avg_pts'],
+                                "Várható Összesített": round(projected_total, 1)
+                            })
+            
+            if team_results:
+                df_res = pd.DataFrame(team_results)
+                st.dataframe(df_res, use_container_width=True)
+                
+                # CSV letöltés
+                csv = df_res.to_csv(index=False).encode('utf-8')
+                st.download_button("Adatok mentése (CSV)", csv, f"nba_odds_analysis_{next_date}.csv", "text/csv")
+            else:
+                st.error("Nem sikerült párosítani a csapatokat az NBA adatbázissal.")
 
 
 
