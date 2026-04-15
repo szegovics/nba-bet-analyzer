@@ -262,7 +262,7 @@ else:
     
     matches = get_next_matchday_from_odds()
     
-    if matches = []:
+    if (matches == []):
         st.warning("Nincs elérhető meccs az Odds API-ban.")
     else:
         st.info(f"Dátum: következő játéknap| Talált meccsek száma: **{len(matches)}**")
