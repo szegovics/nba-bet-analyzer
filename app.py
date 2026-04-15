@@ -22,47 +22,64 @@ MARKETS = 'player_points,player_rebounds,player_assists'
 
 # --- SEGÉDFÜGGVÉNYEK ---
 
-def get_next_nba_day():
-    """Lekéri az NBA-től a legközelebbi olyan dátumot, amin vannak meccsek."""
-    try:
-        # Ha nem adunk meg dátumot, az API az aktuális/következő játéknapot adja vissza
-        sb = scoreboardv2.ScoreboardV2()
-        df = sb.get_data_frames()[0]
-        
-        if not df.empty:
-            # Az API-ból kinyerjük a GAME_DATE_EST értéket (pl. 2024-03-20T00:00:00)
-            raw_date = df.iloc[0]['GAME_DATE_EST']
-            # Átalakítjuk az API által kedvelt MM/DD/YYYY formátumra
-            dt_obj = datetime.strptime(raw_date.split('T')[0], '%Y-%m-%d')
-            return dt_obj.strftime('%m/%d/%Y')
-        return None
-    except:
-        return None
+from nba_api.stats.library.parameters import SeasonAll
+from nba_api.stats.endpoints import scoreboardv2
 
 def get_matchups(date_str):
+    """Lekéri a meccseket, egyedi fejléccel a blokkolás ellen."""
+    headers = {
+        'Host': 'stats.nba.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:72.0) Gecko/20100101 Firefox/72.0',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://stats.nba.com/',
+        'Origin': 'https://stats.nba.com',
+        'Connection': 'keep-alive',
+    }
+    
     try:
-        # Próbáld meg az MM/DD/YYYY formátumot
-        sb = scoreboardv2.ScoreboardV2(game_date=date_str)
-        df = sb.get_data_frames()[0]
+        # Próbáljuk meg lekérni az adatokat fix fejléccel
+        sb = scoreboardv2.ScoreboardV2(game_date=date_str, headers=headers, timeout=30)
+        frames = sb.get_data_frames()
         
-        if df.empty:
+        if not frames or frames[0].empty:
             return []
 
+        df = frames[0]
         matchups = []
-        # Az NBA API minden meccset két sorban tárol (egyik csapat, másik csapat)
-        for i in range(0, len(df), 2):
-            away_row = df.iloc[i]
-            home_row = df.iloc[i+1]
+        
+        # Az NBA API scoreboardv2 'GameHeader' táblája alapján (frames[0])
+        # Itt minden sor egy meccs
+        for i in range(len(df)):
+            game = df.iloc[i]
             matchups.append({
-                'home_name': home_row['TEAM_NAME'],
-                'home_id': home_row['TEAM_ID'],
-                'away_name': away_row['TEAM_NAME'],
-                'away_id': away_row['TEAM_ID']
+                'home_id': game['HOME_TEAM_ID'],
+                'away_id': game['VISITOR_TEAM_ID'],
+                'game_id': game['GAME_ID'],
+                # Mivel a nevek nincsenek benne ebben a táblában fixen, 
+                # a static teams-ből kell kikeresni őket a listázáshoz
+                'home_name': next((t['full_name'] for t in teams.get_teams() if t['id'] == game['HOME_TEAM_ID']), "Hazai"),
+                'away_name': next((t['full_name'] for t in teams.get_teams() if t['id'] == game['VISITOR_TEAM_ID']), "Vendég")
             })
         return matchups
     except Exception as e:
-        print(f"Hiba a meccsek lekérésekor: {e}")
+        st.error(f"API Hiba: {e}")
         return []
+
+def get_next_nba_day():
+    """Megpróbálja kinyerni a következő játéknapot."""
+    try:
+        # Paraméter nélkül az aktuálisat nézi
+        sb = scoreboardv2.ScoreboardV2()
+        df = sb.get_data_frames()[0]
+        if not df.empty:
+            # Visszaadjuk a dátumot az API-nak tetsző formátumban
+            raw_date = df.iloc[0]['GAME_DATE_EST']
+            return datetime.strptime(raw_date.split('T')[0], '%Y-%m-%d').strftime('%m/%d/%Y')
+    except:
+        pass
+    # Ha minden kötél szakad, a holnapi napot adjuk vissza defaultként
+    return (datetime.now() + timedelta(days=1)).strftime('%m/%d/%Y')
 
 def get_live_odds():
     """Lekéri az aktuális fogadási kínálatot az Odds API-tól."""
