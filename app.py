@@ -281,7 +281,7 @@ else:
             home = event['home_team']
             away = event['away_team']
             
-            with st.spinner(f"Elemzés: {away} @ {home}..."):
+            with st.spinner(f"Elemzés: {home} @ {away}..."):
                 all_nba_teams = teams.get_teams()
                 h_id = next((t['id'] for t in all_nba_teams if t['full_name'] == home), None)
                 a_id = next((t['id'] for t in all_nba_teams if t['full_name'] == away), None)
