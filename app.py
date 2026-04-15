@@ -54,7 +54,7 @@ def get_next_matchday_from_odds():
         
         if not res or not isinstance(res, list) or len(res) == 0:
             return None, []
-
+        st.write(res)
         # 1. Kinyerjük az első meccs dátumát (YYYY-MM-DD formátumban)
         first_game_date_str = res[0]['commence_time'].split('T')[0]
         
