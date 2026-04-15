@@ -66,9 +66,9 @@ def get_next_matchday_from_odds():
         
         # 3. Formázzuk a dátumot az NBA API számára (MM/DD/YYYY)
         dt_obj = datetime.strptime(first_game_date_str, '%Y-%m-%d')
-        formatted_date = dt_obj.strftime('%m/%d/%Y')
+        #formatted_date = dt_obj.strftime('%m/%d/%Y')
         
-        return formatted_date, daily_matches
+        return  daily_matches
     except Exception as e:
         st.error(f"Hiba az Odds API lekérésekor: {e}")
         return None, []
@@ -263,10 +263,10 @@ else:
     
    matches = get_next_matchday_from_odds()
     
-    if not matches:
+    if matches == []:
         st.warning("Nincs elérhető meccs az Odds API-ban.")
     else:
-        st.info(f"Dátum: **{target_date}** | Talált meccsek száma: **{len(matches)}**")
+        st.info(f"Dátum: következő játéknap| Talált meccsek száma: **{len(matches)}**")
         
         results = []
         for event in matches:
