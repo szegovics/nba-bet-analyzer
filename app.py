@@ -109,7 +109,7 @@ def get_live_odds():
     try:
 
         events_res = requests.get(url, params={'apiKey': API_KEY}).json()
-
+        st.write(events_res)
         if not isinstance(events_res, list): return []
 
         
