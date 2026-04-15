@@ -22,13 +22,22 @@ MARKETS = 'player_points,player_rebounds,player_assists'
 
 # --- SEGÉDFÜGGVÉNYEK ---
 
-def get_next_game_date():
-    """Az NBA az amerikai keleti part (EST) szerint működik."""
-    tz = pytz.timezone('US/Eastern')
-    now = datetime.now(tz)
-    # Ha korán van kint (pl. reggel), a mai meccsek kellenek.
-    # Ha késő este van, a holnapiak.
-    return now.strftime('%m/%d/%Y') # Az API ezt a formátumot preferálja: MM/DD/YYYY
+def get_next_nba_day():
+    """Lekéri az NBA-től a legközelebbi olyan dátumot, amin vannak meccsek."""
+    try:
+        # Ha nem adunk meg dátumot, az API az aktuális/következő játéknapot adja vissza
+        sb = scoreboardv2.ScoreboardV2()
+        df = sb.get_data_frames()[0]
+        
+        if not df.empty:
+            # Az API-ból kinyerjük a GAME_DATE_EST értéket (pl. 2024-03-20T00:00:00)
+            raw_date = df.iloc[0]['GAME_DATE_EST']
+            # Átalakítjuk az API által kedvelt MM/DD/YYYY formátumra
+            dt_obj = datetime.strptime(raw_date.split('T')[0], '%Y-%m-%d')
+            return dt_obj.strftime('%m/%d/%Y')
+        return None
+    except:
+        return None
 
 def get_matchups(date_str):
     try:
@@ -148,39 +157,48 @@ if analysis_mode == "🔥 Élő Prop Elemző":
                 time.sleep(0.6)
             st.table(pd.DataFrame(results))
 
-else:
-    next_date = get_next_game_date()
-    st.header(f"Szezonális Elemzés: {next_date}")
-    if st.button(f"{next_date} meccseinek elemzése"):
-        matchups = get_matchups(next_date)
-        if not matchups:
-            st.info(f"Nincs meccs a menetrendben erre a napra: {next_date}")
-        else:
-            team_results = []
-            for m in matchups:
-                with st.spinner(f"Adatok: {m['away_name']} @ {m['home_name']}..."):
-                    h_stats = get_season_team_stats(m['home_id'], True)
-                    a_stats = get_season_team_stats(m['away_id'], False)
-                    
-                    projected_total = h_stats['avg_pts'] + a_stats['avg_pts']
-                    
-                    team_results.append({
-                        "Meccs": f"{m['away_name']} @ {m['home_name']}",
-                        "Hazai Win% (Otthon)": h_stats['win_rate'],
-                        "Hazai Dobott (Avg)": h_stats['avg_pts'],
-                        "Hazai Kapott (Avg)": h_stats['opp_pts'],
-                        "Meccsszám (H)": h_stats['gp'],
-                        "Vendég Win% (Idegen)": a_stats['win_rate'],
-                        "Vendég Dobott (Avg)": a_stats['avg_pts'],
-                        "Vendég Kapott (Avg)": a_stats['opp_pts'],
-                        "Meccsszám (V)": a_stats['gp'],
-                        "Várható Összesített": round(projected_total, 1)
-                    })
-                time.sleep(0.7)
-            
-            df_res = pd.DataFrame(team_results)
-            st.table(df_res)
-            st.download_button("Adatok mentése (CSV)", df_res.to_csv(index=False), f"nba_{next_date}.csv")
+# --- UI MEGJELENÍTÉS MÓDOSÍTÁSA ---
 
-st.markdown("---")
-st.caption("A csapat statisztikák a teljes szezon lejátszott meccseinek átlagát mutatják Home/Road bontásban.")
+else:
+    # 1. Lekérjük az automatikus dátumot
+    auto_date = get_next_nba_day()
+    
+    if auto_date:
+        st.header(f"Szezonális Elemzés: {auto_date} (Következő játéknap)")
+        
+        if st.button(f"Elemzés indítása ({auto_date})"):
+            # 2. Lekérjük a meccseket erre a konkrét dátumra
+            matchups = get_matchups(auto_date)
+            
+            if not matchups:
+                st.info("Bár találtunk dátumot, a meccsek részletei nem tölthetők be.")
+            else:
+                team_results = []
+                for m in matchups:
+                    with st.spinner(f"Adatok: {m['away_name']} @ {m['home_name']}..."):
+                        # Csapat statok lekérése
+                        h_stats = get_season_team_stats(m['home_id'], True)
+                        a_stats = get_season_team_stats(m['away_id'], False)
+                        
+                        # Fontos: Késleltetés, hogy az NBA API ne tiltson ki!
+                        time.sleep(0.8) 
+                        
+                        projected_total = h_stats['avg_pts'] + a_stats['avg_pts']
+                        
+                        team_results.append({
+                            "Meccs": f"{m['away_name']} @ {m['home_name']}",
+                            "Hazai Win% (H)": h_stats['win_rate'],
+                            "Hazai Dobott": h_stats['avg_pts'],
+                            "Hazai Kapott": h_stats['opp_pts'],
+                            "Vendég Win% (V)": a_stats['win_rate'],
+                            "Vendég Dobott": a_stats['avg_pts'],
+                            "Vendég Kapott": a_stats['opp_pts'],
+                            "Várható Totál": round(projected_total, 1)
+                        })
+                
+                if team_results:
+                    df_res = pd.DataFrame(team_results)
+                    st.table(df_res)
+                    st.download_button("Adatok mentése (CSV)", df_res.to_csv(index=False), f"nba_analysis_{auto_date.replace('/','-')}.csv")
+    else:
+        st.error("Nem sikerült lekérni a következő játéknapot az NBA API-tól.")
