@@ -261,9 +261,9 @@ if analysis_mode == "🔥 Élő Prop Elemző":
 else:
 
     
-   target_date, matches = get_next_matchday_from_odds()
+   matches = get_next_matchday_from_odds()
     
-    if not target_date:
+    if not matches:
         st.warning("Nincs elérhető meccs az Odds API-ban.")
     else:
         st.info(f"Dátum: **{target_date}** | Talált meccsek száma: **{len(matches)}**")
