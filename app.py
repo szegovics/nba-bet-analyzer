@@ -74,7 +74,7 @@ def get_next_matchday_from_odds():
         ]
         
         # 3. Formázzuk a dátumot az NBA API számára (MM/DD/YYYY)
-        dt_obj = datetime.strptime(first_game_date_str, '%Y-%m-%d')
+        #dt_obj = datetime.strptime(first_game_date_str, '%Y-%m-%d')
         #formatted_date = dt_obj.strftime('%m/%d/%Y')
         
         return  daily_matches
