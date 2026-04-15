@@ -54,14 +54,13 @@ def get_next_matchday_from_odds():
         
         if not res or not isinstance(res, list) or len(res) == 0:
             return None, []
-        st.write(res)
         # 1. Kinyerjük az első meccs dátumát (YYYY-MM-DD formátumban)
         first_game_date_str = res[0]['commence_time'].split('T')[0]
         
         # 2. Összegyűjtjük az összes meccset, ami ezen a napon van
         daily_matches = [
             event for event in res 
-            if event['commence_time'].startswith(first_game_date_str)
+            if event['commence_time'].startswith(first_game_date_str) or event['commence_time'].startswith(first_game_date_str+1) 
         ]
         
         # 3. Formázzuk a dátumot az NBA API számára (MM/DD/YYYY)
