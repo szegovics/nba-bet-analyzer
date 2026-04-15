@@ -249,8 +249,7 @@ if analysis_mode == "🔥 Élő Prop Elemző":
 
 else:
 
-    if st.button("Következő meccsnap elemzése (Odds API alapú)"):
-    # 1. Lekérjük a meccseket az Odds API-ról
+    
     next_date, events = get_next_matchday_from_odds()
     
     if not next_date or not events:
