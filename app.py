@@ -23,19 +23,24 @@ MARKETS = 'player_points,player_rebounds,player_assists'
 # --- SEGÉDFÜGGVÉNYEK ---
 
 def get_next_game_date():
-    """Kiszámolja a következő meccsnap dátumát (magyar idő szerint holnap)."""
-    tz = pytz.timezone('Europe/Budapest')
+    """Az NBA az amerikai keleti part (EST) szerint működik."""
+    tz = pytz.timezone('US/Eastern')
     now = datetime.now(tz)
-    # Ha hajnal van, még a mai meccsek érdekesek, ha nappal, akkor a holnapiak
-    next_day = now + timedelta(days=1)
-    return next_day.strftime('%Y-%m-%d')
+    # Ha korán van kint (pl. reggel), a mai meccsek kellenek.
+    # Ha késő este van, a holnapiak.
+    return now.strftime('%m/%d/%Y') # Az API ezt a formátumot preferálja: MM/DD/YYYY
 
 def get_matchups(date_str):
-    """Lekéri a meccseket egy adott napra."""
     try:
+        # Próbáld meg az MM/DD/YYYY formátumot
         sb = scoreboardv2.ScoreboardV2(game_date=date_str)
         df = sb.get_data_frames()[0]
+        
+        if df.empty:
+            return []
+
         matchups = []
+        # Az NBA API minden meccset két sorban tárol (egyik csapat, másik csapat)
         for i in range(0, len(df), 2):
             away_row = df.iloc[i]
             home_row = df.iloc[i+1]
@@ -46,7 +51,8 @@ def get_matchups(date_str):
                 'away_id': away_row['TEAM_ID']
             })
         return matchups
-    except:
+    except Exception as e:
+        print(f"Hiba a meccsek lekérésekor: {e}")
         return []
 
 def get_live_odds():
