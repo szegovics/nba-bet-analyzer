@@ -47,19 +47,30 @@ MARKETS = 'player_points,player_rebounds,player_assists'
 
 
 def get_next_matchday_from_odds():
-    """Lekéri a következő meccsnap dátumát az Odds API eseményeiből."""
+    """Lekéri a következő meccsnap dátumát és az aznapi meccseket."""
     url = f'https://api.the-odds-api.com/v4/sports/basketball_nba/events'
     try:
         res = requests.get(url, params={'apiKey': API_KEY}).json()
-        if res and isinstance(res, list) and len(res) > 0:
-            # Az első elérhető meccs kezdési ideje (pl: 2024-04-16T23:30:00Z)
-            first_game_time = res[0]['commence_time']
-            # Átalakítjuk az NBA API által kedvelt MM/DD/YYYY formátumra
-            dt_obj = datetime.strptime(first_game_time.split('T')[0], '%Y-%m-%d')
-            return dt_obj.strftime('%m/%d/%Y'), res
-        return None, []
+        
+        if not res or not isinstance(res, list) or len(res) == 0:
+            return None, []
+
+        # 1. Kinyerjük az első meccs dátumát (YYYY-MM-DD formátumban)
+        first_game_date_str = res[0]['commence_time'].split('T')[0]
+        
+        # 2. Összegyűjtjük az összes meccset, ami ezen a napon van
+        daily_matches = [
+            event for event in res 
+            if event['commence_time'].startswith(first_game_date_str)
+        ]
+        
+        # 3. Formázzuk a dátumot az NBA API számára (MM/DD/YYYY)
+        dt_obj = datetime.strptime(first_game_date_str, '%Y-%m-%d')
+        formatted_date = dt_obj.strftime('%m/%d/%Y')
+        
+        return formatted_date, daily_matches
     except Exception as e:
-        st.error(f"Hiba az események lekérésekor: {e}")
+        st.error(f"Hiba az Odds API lekérésekor: {e}")
         return None, []
 
 
@@ -246,53 +257,42 @@ if analysis_mode == "🔥 Élő Prop Elemző":
 
             st.table(pd.DataFrame(results))
 
-
+    
 else:
 
     
-    next_date, events = get_next_matchday_from_odds()
+   target_date, matches = get_next_matchday_from_odds()
     
-    if not next_date or not events:
-        st.warning("Nem találtam meccseket az Odds API-ban.")
+    if not target_date:
+        st.warning("Nincs elérhető meccs az Odds API-ban.")
     else:
-        st.info(f"Elemzés indítása a következő napra: {next_date}")
-        team_results = []
+        st.info(f"Dátum: **{target_date}** | Talált meccsek száma: **{len(matches)}**")
         
-        for event in events:
-            # Csak a következő játéknap meccseit nézzük (kiszűrjük a távolabbiakat)
-            target_iso = datetime.strptime(next_date, '%m/%d/%Y').strftime('%Y-%m-%d')
-            if not event['commence_time'].startswith(target_iso):
-                continue
-                
-            h_name = event['home_team']
-            a_name = event['away_team']
+        results = []
+        for event in matches:
+            home = event['home_team']
+            away = event['away_team']
             
-            with st.spinner(f"Adatok lekérése: {a_name} @ {h_name}..."):
-                # Csapat ID-k kikeresése a nevekből
+            with st.spinner(f"Elemzés: {away} @ {home}..."):
                 all_nba_teams = teams.get_teams()
-                # Fontos: Az Odds API nevei (pl. 'Boston Celtics') egyeznek az NBA API full_name mezőjével
-                h_id = next((t['id'] for t in all_nba_teams if t['full_name'] == h_name), None)
-                a_id = next((t['id'] for t in all_nba_teams if t['full_name'] == a_name), None)
+                h_id = next((t['id'] for t in all_nba_teams if t['full_name'] == home), None)
+                a_id = next((t['id'] for t in all_nba_teams if t['full_name'] == away), None)
                 
                 if h_id and a_id:
-                    # Itt hívjuk a statisztikai függvényt, amit korábban írtunk
+                    # Itt jönnek a korábban megírt statisztikai lekérések
                     h_stats = get_season_team_stats(h_id, True)
-                    time.sleep(1.5) # Szünet az API blokkolás ellen
+                    time.sleep(1.5) # Fontos a szünet!
                     a_stats = get_season_team_stats(a_id, False)
                     time.sleep(1.5)
                     
-                    projected_total = h_stats['avg_pts'] + a_stats['avg_pts']
-                    
-                    team_results.append({
-                        "Meccs": f"{a_name} @ {h_name}",
-                        "Hazai forma": h_stats['win_rate'],
-                        "Hazai átlag": h_stats['avg_pts'],
-                        "Vendég forma": a_stats['win_rate'],
-                        "Vendég átlag": a_stats['avg_pts'],
-                        "Várható Pontszám": round(projected_total, 1)
+                    results.append({
+                        "Meccs": f"{away} @ {home}",
+                        "Hazai Win%": h_stats['win_rate'],
+                        "Hazai Átlag": h_stats['avg_pts'],
+                        "Vendég Win%": a_stats['win_rate'],
+                        "Vendég Átlag": a_stats['avg_pts'],
+                        "Várható Pontszám": round(h_stats['avg_pts'] + a_stats['avg_pts'], 1)
                     })
-                else:
-                    st.error(f"Nem találtam ID-t a csapathoz: {h_name} vagy {a_name}")
-
-        if team_results:
-            st.table(pd.DataFrame(team_results))
+        
+        if results:
+            st.table(pd.DataFrame(results))
